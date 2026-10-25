@@ -1,9 +1,12 @@
 import os
+import logging
 
 from firebase_admin import messaging
 from django.conf import settings
 
 from notifications.models import Notification
+
+logger = logging.getLogger('notifications')
 
 
 def fcm_push(notification_id, tokens=None):
@@ -20,6 +23,7 @@ def fcm_push(notification_id, tokens=None):
         app_config = notification.category.app_config
 
     except Notification.DoesNotExist:
+        logger.exception(f'Notification #{notification_id} does not exist')
         return False
 
     base_notification = messaging.Notification(
@@ -85,6 +89,7 @@ def fcm_push(notification_id, tokens=None):
         else:
             _ = messaging.send(message, dry_run=False)
     except Exception:
+        logger.exception(f'Could not push notification #{notification_id}')
         return False
 
     return True
@@ -101,6 +106,7 @@ def fcm_subscribe(tokens, topic):
     try:
         _ = messaging.subscribe_to_topic(tokens, topic)
     except Exception:
+        logger.exception(f'Could not subscribe tokens to the topic {topic}')
         return False
 
     return True
@@ -118,6 +124,9 @@ def fcm_unsubscribe(tokens, topic):
     try:
         _ = messaging.unsubscribe_from_topic(tokens, topic)
     except Exception:
+        logger.exception(
+            f'Could not unsubscribe tokens from the topic {topic}'
+        )
         return False
 
     return True
