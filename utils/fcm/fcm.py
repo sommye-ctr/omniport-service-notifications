@@ -119,12 +119,12 @@ def fcm_subscribe(tokens, topic):
     """
 
     try:
-        _ = messaging.subscribe_to_topic(tokens, topic)
+        response = messaging.subscribe_to_topic(tokens, topic)
     except Exception:
         logger.exception(f'Could not subscribe tokens to the topic {topic}')
         return False
 
-    return True
+    return _check_topic_response(response, 'subscribe to', topic)
 
 
 def fcm_unsubscribe(tokens, topic):
@@ -137,10 +137,31 @@ def fcm_unsubscribe(tokens, topic):
     """
 
     try:
-        _ = messaging.unsubscribe_from_topic(tokens, topic)
+        response = messaging.unsubscribe_from_topic(tokens, topic)
     except Exception:
         logger.exception(
             f'Could not unsubscribe tokens from the topic {topic}'
+        )
+        return False
+
+    return _check_topic_response(response, 'unsubscribe from', topic)
+
+
+def _check_topic_response(response, operation, topic):
+    """
+    Log the tokens that FCM refused to move, which it reports in the response
+    rather than by raising
+    :param response: TopicManagementResponse from FCM
+    :param operation: Description of the operation, for the log
+    :param topic: FCM topic/category slug
+    :return: success True/False
+    """
+
+    if response.failure_count:
+        reasons = ', '.join(error.reason for error in response.errors)
+        logger.warning(
+            f'{response.failure_count} tokens could not {operation} the topic '
+            f'{topic}: {reasons}'
         )
         return False
 
