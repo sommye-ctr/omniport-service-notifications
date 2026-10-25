@@ -27,7 +27,8 @@ def push_notification(
         person=None,
         has_custom_users_target=False,
         persons=None,
-        send_only_to_subscribed_users=False
+        send_only_to_subscribed_users=False,
+        data=None
 ):
     """
     Unified method to generate notification object and execute pushing
@@ -41,6 +42,7 @@ def push_notification(
     :param has_custom_users_target: Flag for a notification with a custom users target
     :param persons: Custom users (person's instance/id) target
     :param send_only_to_subscribed_users: Flag for a notification only to be sent to subscribed users
+    :param data: Key value pairs sent to the client along with the push
     :return: Notification object
     """
 
@@ -57,6 +59,7 @@ def push_notification(
         ios_onclick_action=ios_onclick_action,
         is_personalised=is_personalised,
         has_custom_users_target=has_custom_users_target,
+        data=dict(data) if data is not None else None,
     )
 
     # Exception handling
@@ -79,7 +82,7 @@ def push_notification(
             if isinstance(person, Person):
                 person = person.id
 
-            notification.save()
+            _save(notification)
             all_endpoints = PushEndpoint.fetch(person)
             UserNotification(
                 person_id=person,
@@ -126,7 +129,7 @@ def push_notification(
             # Grab an intersection of the subscribed people and the complete list
             persons = list(subscribed_persons.intersection(persons))
 
-        notification.save()
+        _save(notification)
         _ = execute_users_set_push(
             notification_id=notification.id,
             persons=persons
@@ -137,10 +140,23 @@ def push_notification(
         return notification
 
     if not (is_personalised and has_custom_users_target):
-        notification.save()
+        _save(notification)
         _ = execute_topic_push(notification)
         logger.info(
             f'Topic notification #{notification.id} successfully sent'
         )
 
     return notification
+
+
+def _save(notification):
+    """
+    Save the notification, then record its id in its data so that a client
+    can tell which stored notification a push corresponds to
+    :param notification: Notification object to save
+    """
+
+    notification.save()
+    if notification.data is not None:
+        notification.data['notificationId'] = str(notification.id)
+        notification.save(update_fields=['data'])

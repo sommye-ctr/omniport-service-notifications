@@ -23,6 +23,7 @@ class NotificationSerializer(ModelSerializer):
             'template',
             'category',
             'web_onclick_url',
+            'data',
             'datetime_modified',
         )
 
