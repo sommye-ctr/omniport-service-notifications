@@ -195,6 +195,34 @@ _module('categories.redisdb', Subscription=types.SimpleNamespace(
     fetch_people=lambda category_slug, action: [],
 ))
 
+
+class ModelSerializer:
+    """
+    Serialize the fields that the notification serializer reads back, the way
+    the real nested category serializer would
+    """
+
+    def __init__(self, instance=None, context=None, **kwargs):
+        self.instance = instance
+        self.context = context or {}
+
+    def to_representation(self, instance):
+        return {
+            'id': instance.id,
+            'template': instance.template,
+            'category': {
+                'name': instance.category.name,
+                'slug': instance.category.slug,
+            },
+            'data': instance.data,
+        }
+
+
+_module('formula_one')
+_module('formula_one.serializers')
+_module('formula_one.serializers.base', ModelSerializer=ModelSerializer)
+_module('categories.serializers', CategorySerializer=ModelSerializer)
+
 # The package itself is the repository, loaded under the name it has in
 # omniport. The FCM package is replaced because its __init__ reads the
 # service account certificate.
@@ -219,6 +247,7 @@ actions = importlib.import_module('notifications.actions')
 prune = importlib.import_module(
     'notifications.management.commands.prunepushendpoints'
 )
+serializers = importlib.import_module('notifications.serializers.notification')
 
 PushEndpoint = push_endpoint.PushEndpoint
 

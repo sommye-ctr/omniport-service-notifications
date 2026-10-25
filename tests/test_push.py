@@ -15,7 +15,9 @@ from unittest import mock
 from firebase_admin import exceptions, messaging
 
 import stubs
-from stubs import Category, PushEndpoint, actions, fcm, prune, tasks
+from stubs import (
+    Category, PushEndpoint, actions, fcm, prune, serializers, tasks
+)
 
 DATA = {
     'type': 'results',
@@ -352,6 +354,46 @@ class PruneTestCase(unittest.TestCase):
             sorted(send_multicast.call_args.args[0].tokens),
             ['fresh', 'uninstalled', 'web'],
         )
+
+
+class SerializerTestCase(unittest.TestCase):
+    """
+    The bell's header comes from the title sent with the push
+    """
+
+    def setUp(self):
+        stubs.reset()
+
+    @staticmethod
+    def serialize(data, unread=()):
+        notification = stubs.notification(7, data=data, category=Category(
+            'placement_and_internship__profile_announcement__pla',
+            name='Placement',
+        ))
+        return serializers.NotificationSerializer(
+            notification, context={'unread': set(unread)}
+        ).to_representation(notification)
+
+    def test_the_title_replaces_the_category_name(self):
+        representation = self.serialize(DATA)
+
+        self.assertEqual(representation['category']['name'], DATA['title'])
+        self.assertEqual(
+            representation['category']['slug'],
+            'placement_and_internship__profile_announcement__pla',
+        )
+
+    def test_the_category_name_stays_without_a_title(self):
+        for data in (None, {'type': 'results'}, {'title': ''}):
+            self.assertEqual(
+                self.serialize(data)['category']['name'], 'Placement'
+            )
+
+    def test_the_data_map_and_unread_state_are_returned(self):
+        representation = self.serialize(DATA, unread=[7])
+
+        self.assertEqual(representation['data'], DATA)
+        self.assertTrue(representation['unread'])
 
 
 if __name__ == '__main__':
