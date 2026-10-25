@@ -4,14 +4,12 @@ import logging
 from categories.redisdb import Subscription
 from notifications.models import Notification
 from notifications.tasks import (
+    endpoints_of,
     execute_topic_push,
     execute_users_set_push,
+    push_to_endpoints,
 )
-from notifications.utils.fcm import fcm_push
-from notifications.redisdb import (
-    PushEndpoint,
-    UserNotification,
-)
+from notifications.redisdb import UserNotification
 
 Person = swapper.load_model('kernel', 'Person')
 logger = logging.getLogger('notifications')
@@ -83,15 +81,15 @@ def push_notification(
                 person = person.id
 
             _save(notification)
-            all_endpoints = PushEndpoint.fetch(person)
+            all_endpoints = endpoints_of(person)
             UserNotification(
                 person_id=person,
                 notification_id=notification.id
             ).push()
             if all_endpoints:
-                _ = fcm_push(
+                _ = push_to_endpoints(
                     notification_id=notification.id,
-                    tokens=all_endpoints,
+                    endpoints=all_endpoints,
                 )
             logger.info(
                 f'Personal notification #{notification.id} successfully sent'

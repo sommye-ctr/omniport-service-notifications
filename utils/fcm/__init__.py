@@ -4,7 +4,9 @@ from firebase_admin import credentials
 from django.conf import settings
 
 from notifications.utils.fcm.fcm import (
+    DEAD_TOKEN_ERRORS,
     fcm_push,
+    fcm_push_multicast,
     fcm_subscribe,
     fcm_unsubscribe
 )
@@ -16,4 +18,10 @@ service_account_file = os.path.join(
 cred = credentials.Certificate(str(service_account_file))
 default_app = firebase_admin.initialize_app(cred)
 
-__all__ = ['fcm_subscribe', 'fcm_push', 'fcm_unsubscribe']
+__all__ = [
+    'DEAD_TOKEN_ERRORS',
+    'fcm_subscribe',
+    'fcm_push',
+    'fcm_push_multicast',
+    'fcm_unsubscribe',
+]

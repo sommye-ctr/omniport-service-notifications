@@ -8,6 +8,12 @@ from notifications.models import Notification
 
 logger = logging.getLogger('notifications')
 
+# Errors after which a token will never receive a push again
+DEAD_TOKEN_ERRORS = (
+    messaging.UnregisteredError,
+    messaging.SenderIdMismatchError,
+)
+
 
 def fcm_push(notification_id, tokens=None):
     """
@@ -15,7 +21,35 @@ def fcm_push(notification_id, tokens=None):
     topic(category slug), or to a specific user targeted by the specified token.
     :param notification_id: Notification id.
     :param tokens: Specific tokens of clients to push the notification to.
-    :return: None
+    :return: success True/False
+    """
+
+    return _send(notification_id, tokens) is not None
+
+
+def fcm_push_multicast(notification_id, tokens):
+    """
+    FCM message push to specific tokens, reporting the result for each token
+    :param notification_id: Notification id.
+    :param tokens: Specific tokens of clients to push the notification to.
+    :return: BatchResponse in the order of the tokens, or None if nothing
+    could be sent
+    """
+
+    # Without tokens the message would go to the whole topic
+    if not tokens:
+        return None
+
+    return _send(notification_id, tokens)
+
+
+def _send(notification_id, tokens):
+    """
+    Build the message for the notification and send it to the tokens, or to
+    its topic when there are none
+    :param notification_id: Notification id.
+    :param tokens: Specific tokens of clients to push the notification to.
+    :return: response from FCM, or None if nothing could be sent
     """
 
     try:
@@ -24,7 +58,7 @@ def fcm_push(notification_id, tokens=None):
 
     except Notification.DoesNotExist:
         logger.exception(f'Notification #{notification_id} does not exist')
-        return False
+        return None
 
     # FCM only accepts string values in the data map
     payload = {
@@ -100,14 +134,14 @@ def fcm_push(notification_id, tokens=None):
     try:
         # use dry_run = True for testing purpose
         if tokens:
-            _ = messaging.send_multicast(message, dry_run=False)
+            response = messaging.send_multicast(message, dry_run=False)
         else:
-            _ = messaging.send(message, dry_run=False)
+            response = messaging.send(message, dry_run=False)
     except Exception:
         logger.exception(f'Could not push notification #{notification_id}')
-        return False
+        return None
 
-    return True
+    return response
 
 
 def fcm_subscribe(tokens, topic):
