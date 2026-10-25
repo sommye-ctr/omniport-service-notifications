@@ -1,5 +1,3 @@
-import time
-
 from django_redis import get_redis_connection
 
 from notifications.constants import REDIS_CONNECTION_NAME
@@ -17,9 +15,6 @@ class PushEndpoint:
     # Which person and field a token is registered under, so that a token
     # posted by somebody else can be taken away from its previous owner
     owner_key_prefix = 'notifications:push_endpoint:token'
-
-    # When each field last posted its token, for pruning abandoned ones
-    seen_key_prefix = 'notifications:push_endpoint:seen'
 
     def __init__(self, person_id, session_id, endpoint):
         """
@@ -48,11 +43,6 @@ class PushEndpoint:
             f'{self.owner_key_prefix}:{self.endpoint}',
             f'{self.person_id}|{self.session_id}'
         )
-        pipe.hset(
-            f'{self.seen_key_prefix}:{self.person_id}',
-            self.session_id,
-            int(time.time())
-        )
         pipe.execute()
         return True
 
@@ -72,10 +62,6 @@ class PushEndpoint:
             f'{cls.key_prefix}:{person_id}',
             session_id
         )
-        pipe.hdel(
-            f'{cls.seen_key_prefix}:{person_id}',
-            session_id
-        )
         if (
             endpoint is not None
             and cls.owner(endpoint) == (int(person_id), session_id)
@@ -88,7 +74,7 @@ class PushEndpoint:
     def remove(cls, person_id, session_id, endpoint):
         """
         Delete the endpoint only if the field still holds it, so that a token
-        found to be stale does not take a newer one posted since with it
+        found to be dead does not take a newer one posted since with it
         :param person_id: Person's db id
         :param session_id: Field the endpoint was registered under
         :param endpoint: endpoint value
@@ -147,22 +133,6 @@ class PushEndpoint:
         return {
             field.decode('utf-8'): endpoint.decode('utf-8')
             for field, endpoint in results.items()
-        }
-
-    @classmethod
-    def fetch_seen(cls, person_id):
-        """
-        Fetch when each field last posted its endpoint
-        :param person_id: Person's db id
-        :return: dict of field to epoch seconds
-        """
-
-        results = client.hgetall(
-            f'{cls.seen_key_prefix}:{person_id}',
-        )
-        return {
-            field.decode('utf-8'): int(seen)
-            for field, seen in results.items()
         }
 
     @classmethod

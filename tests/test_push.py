@@ -7,7 +7,6 @@ firebase_admin installed, with
 """
 
 import io
-import time
 import types
 import unittest
 from unittest import mock
@@ -203,7 +202,6 @@ class DirectSendTestCase(unittest.TestCase):
             PushEndpoint.fetch_fields(1), {'placement-app:b': 'alive'}
         )
         self.assertIsNone(PushEndpoint.owner('dead'))
-        self.assertNotIn('placement-app:a', PushEndpoint.fetch_seen(1))
 
     def test_a_token_of_another_sender_is_removed(self):
         self.send({
@@ -277,83 +275,93 @@ class DirectSendTestCase(unittest.TestCase):
 
 class PruneTestCase(unittest.TestCase):
     """
-    The weekly prune deletes stale phone tokens and the tokens FCM rejects
+    The weekly prune deletes the tokens that FCM rejects, and only those
     """
 
     def setUp(self):
         stubs.reset()
-        stubs.Subscriptions.rows = [
-            (1, Category(
-                'placement_and_internship__results__pla', {'fcmTopic': True}
-            ), 'notifications'),
-        ]
-        store(1, 'placement-app:stale', 'stale')
-        store(1, 'placement-app:fresh', 'fresh')
+        store(1, 'placement-app:a', 'alive')
         store(1, 'web-session', 'uninstalled')
-        store(2, 'old-web-session', 'web')
-        long_ago = int(time.time()) - 91 * 24 * 60 * 60
-        stubs.redis.hset(
-            f'{PushEndpoint.seen_key_prefix}:1', 'placement-app:stale', long_ago
-        )
-        stubs.redis.hset(
-            f'{PushEndpoint.seen_key_prefix}:2', 'old-web-session', long_ago
-        )
+        store(2, 'placement-app:b', 'elsewhere')
+        store(2, 'placement-app:c', 'unavailable')
 
-    def run_command(self, dry_run):
-        stdout = io.StringIO()
-        patches = (
-            mock.patch.object(
+    def run_command(self, dry_run, side_effect=None):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(
                 messaging, 'send_multicast',
-                side_effect=batch_response({'uninstalled': unregistered()}),
-            ),
-            mock.patch.object(
-                messaging, 'unsubscribe_from_topic',
-                return_value=messaging.TopicManagementResponse(
-                    {'results': [{}]}
-                ),
-            ),
-        )
-        with patches[0] as send_multicast, patches[1] as unsubscribe:
-            prune.Command(stdout=stdout).handle(dry_run=dry_run)
-        return stdout.getvalue(), send_multicast, unsubscribe
+                side_effect=side_effect or batch_response({
+                    'uninstalled': unregistered(),
+                    'elsewhere': messaging.SenderIdMismatchError('Mismatch'),
+                    'unavailable': exceptions.UnavailableError('Try later'),
+                }),
+        ) as send_multicast, mock.patch.object(
+                messaging, 'unsubscribe_from_topic'
+        ) as unsubscribe:
+            prune.Command(stdout=stdout, stderr=stderr).handle(
+                dry_run=dry_run
+            )
+        self.send_multicast = send_multicast
+        self.unsubscribe = unsubscribe
+        return stdout.getvalue(), stderr.getvalue()
 
     def test_a_dry_run_lists_the_tokens_and_deletes_nothing(self):
-        output, _, unsubscribe = self.run_command(dry_run=True)
+        output, _ = self.run_command(dry_run=True)
 
-        self.assertIn('placement-app:stale', output)
-        self.assertIn('web-session', output)
-        self.assertIn('Would delete 1 stale and 1 dead tokens out of 4', output)
-        self.assertEqual(len(PushEndpoint.fetch(1)), 3)
-        unsubscribe.assert_not_called()
+        self.assertIn('person 1 under web-session', output)
+        self.assertIn('person 2 under placement-app:b', output)
+        self.assertIn('Would delete 2 dead tokens out of 4', output)
+        self.assertEqual(len(PushEndpoint.fetch(1)), 2)
+        self.assertEqual(len(PushEndpoint.fetch(2)), 2)
 
-    def test_a_stale_phone_token_leaves_its_topics_and_is_deleted(self):
-        _, _, unsubscribe = self.run_command(dry_run=False)
+    def test_the_tokens_fcm_rejects_are_deleted(self):
+        output, _ = self.run_command(dry_run=False)
 
-        unsubscribe.assert_called_once_with(
-            ['stale'], 'placement_and_internship__results__pla'
+        self.assertEqual(
+            PushEndpoint.fetch_fields(1), {'placement-app:a': 'alive'}
         )
-        self.assertNotIn('placement-app:stale', PushEndpoint.fetch_fields(1))
+        self.assertIsNone(PushEndpoint.owner('uninstalled'))
+        self.assertIn('Deleted 2 dead tokens out of 4', output)
 
-    def test_a_token_fcm_rejects_is_deleted(self):
+    def test_a_token_is_kept_on_any_other_error(self):
         self.run_command(dry_run=False)
 
         self.assertEqual(
-            PushEndpoint.fetch_fields(1), {'placement-app:fresh': 'fresh'}
+            PushEndpoint.fetch_fields(2), {'placement-app:c': 'unavailable'}
         )
 
-    def test_only_phone_tokens_expire_by_age(self):
+    def test_a_dead_token_is_deleted_without_moving_topics(self):
         self.run_command(dry_run=False)
 
-        self.assertEqual(PushEndpoint.fetch(2), ['web'])
+        self.unsubscribe.assert_not_called()
 
-    def test_the_check_is_a_dry_run_send(self):
-        _, send_multicast, _ = self.run_command(dry_run=False)
+    def test_the_check_is_a_dry_run_send_to_every_token(self):
+        self.run_command(dry_run=False)
 
-        self.assertTrue(send_multicast.call_args.kwargs['dry_run'])
+        self.assertTrue(self.send_multicast.call_args.kwargs['dry_run'])
         self.assertEqual(
-            sorted(send_multicast.call_args.args[0].tokens),
-            ['fresh', 'uninstalled', 'web'],
+            sorted(self.send_multicast.call_args.args[0].tokens),
+            ['alive', 'elsewhere', 'unavailable', 'uninstalled'],
         )
+
+    def test_tokens_are_checked_in_batches_of_500(self):
+        for i in range(497):
+            store(3, f'placement-app:{i}', f'token-{i}')
+
+        self.run_command(dry_run=True)
+
+        self.assertEqual(
+            [len(call.args[0].tokens)
+             for call in self.send_multicast.call_args_list],
+            [500, 1],
+        )
+
+    def test_nothing_is_deleted_when_fcm_cannot_be_reached(self):
+        _, errors = self.run_command(
+            dry_run=False, side_effect=exceptions.UnavailableError('Down')
+        )
+
+        self.assertEqual(len(PushEndpoint.fetch(1)), 2)
+        self.assertIn('4 tokens could not be checked with FCM', errors)
 
 
 class SerializerTestCase(unittest.TestCase):

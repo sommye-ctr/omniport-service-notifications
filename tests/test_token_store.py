@@ -92,14 +92,17 @@ class RegisterEndpointTestCase(TopicTestCase):
             (2, RESULTS_INT, 'notifications'),
         ]
 
-    def test_a_new_token_is_stored_with_its_owner_and_time(self):
+    def test_a_new_token_is_stored_with_its_owner(self):
         push_endpoints.register_endpoint(1, 'placement-app:a', 'token')
 
         self.assertEqual(
             PushEndpoint.fetch_one(1, 'placement-app:a'), 'token'
         )
         self.assertEqual(PushEndpoint.owner('token'), (1, 'placement-app:a'))
-        self.assertIn('placement-app:a', PushEndpoint.fetch_seen(1))
+        self.assertEqual(sorted(stubs.redis.data), [
+            'notifications:push_endpoint:person:1',
+            'notifications:push_endpoint:token:token',
+        ])
 
     def test_a_new_token_joins_only_the_topics_marked_true(self):
         push_endpoints.register_endpoint(1, 'placement-app:a', 'token')
@@ -148,7 +151,6 @@ class RegisterEndpointTestCase(TopicTestCase):
         push_endpoints.register_endpoint(2, 'placement-app:b', 'token')
 
         self.assertEqual(PushEndpoint.fetch(1), [])
-        self.assertEqual(PushEndpoint.fetch_seen(1), {})
         self.assertEqual(PushEndpoint.fetch(2), ['token'])
         self.assertEqual(PushEndpoint.owner('token'), (2, 'placement-app:b'))
 
@@ -219,7 +221,6 @@ class UnregisterEndpointTestCase(TopicTestCase):
         self.assertEqual(
             PushEndpoint.fetch_fields(1), {'placement-app:b': 'other'}
         )
-        self.assertNotIn('placement-app:a', PushEndpoint.fetch_seen(1))
         self.assertIsNone(PushEndpoint.owner('token'))
         self.assertEqual(PushEndpoint.owner('other'), (1, 'placement-app:b'))
 
