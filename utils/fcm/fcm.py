@@ -26,13 +26,24 @@ def fcm_push(notification_id, tokens=None):
         logger.exception(f'Notification #{notification_id} does not exist')
         return False
 
+    # FCM only accepts string values in the data map
+    payload = {
+        key: '' if value is None else str(value)
+        for key, value in (notification.data or {}).items()
+    }
+
     base_notification = messaging.Notification(
-        title=notification.category.name,
+        title=payload.get('title') or notification.category.name,
         body=notification.template,
     )
     android_conf = messaging.AndroidConfig(
         notification=messaging.AndroidNotification(
-            click_action=notification.android_onclick_activity
+            click_action=notification.android_onclick_activity or None
+        )
+    )
+    apns_conf = messaging.APNSConfig(
+        payload=messaging.APNSPayload(
+            aps=messaging.Aps(sound='default')
         )
     )
 
@@ -69,15 +80,19 @@ def fcm_push(notification_id, tokens=None):
     # else it is assumed that it is a topic based broadcast
     if tokens:
         message = messaging.MulticastMessage(
+            data=payload,
             notification=base_notification,
             android=android_conf,
+            apns=apns_conf,
             webpush=webpush_conf,
             tokens=tokens
         )
     else:
         message = messaging.Message(
+            data=payload,
             notification=base_notification,
             android=android_conf,
+            apns=apns_conf,
             webpush=webpush_conf,
             topic=notification.category.slug
         )
