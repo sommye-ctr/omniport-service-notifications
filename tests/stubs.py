@@ -147,6 +147,33 @@ class QuerySet(list):
         return self
 
 
+class Roots:
+    """
+    The root Category rows, which are the apps and services
+    """
+
+    rows = []
+
+    def root_nodes(self):
+        return RootQuerySet(self.rows)
+
+
+class RootQuerySet(list):
+    def filter(self, slug):
+        return RootQuerySet(root for root in self if root.slug == slug)
+
+
+class SubscriptionTreeSerializer:
+    """
+    Record what the view asks the categories service to serialize
+    """
+
+    def __init__(self, instance, many=False, context=None):
+        self.data = [
+            {'slug': root.slug, 'context': context} for root in instance
+        ]
+
+
 class Notifications:
     """
     The Notification rows by id
@@ -188,9 +215,25 @@ _module('omniport.celery', celery_app=types.SimpleNamespace(
     control=types.SimpleNamespace(add_consumer=lambda *args, **kwargs: None),
 ))
 _module('categories')
-_module('categories.models', UserSubscription=types.SimpleNamespace(
-    objects=Subscriptions(),
+_module(
+    'categories.models',
+    UserSubscription=types.SimpleNamespace(objects=Subscriptions()),
+    Category=types.SimpleNamespace(objects=Roots()),
+)
+_module('categories.utils')
+_module('categories.utils.get_subscription', GetSubscription=None)
+_module('rest_framework')
+_module(
+    'rest_framework.status',
+    HTTP_201_CREATED=201,
+    HTTP_400_BAD_REQUEST=400,
+    HTTP_500_INTERNAL_SERVER_ERROR=500,
+)
+_module('rest_framework.permissions', IsAuthenticated=object)
+_module('rest_framework.response', Response=lambda data=None, status=200: (
+    types.SimpleNamespace(data=data, status_code=status)
 ))
+_module('rest_framework.views', APIView=object)
 _module('categories.redisdb', Subscription=types.SimpleNamespace(
     fetch_people=lambda category_slug, action: [],
 ))
@@ -221,17 +264,23 @@ class ModelSerializer:
 _module('formula_one')
 _module('formula_one.serializers')
 _module('formula_one.serializers.base', ModelSerializer=ModelSerializer)
-_module('categories.serializers', CategorySerializer=ModelSerializer)
+_module(
+    'categories.serializers',
+    CategorySerializer=ModelSerializer,
+    SubscriptionTreeSerializer=SubscriptionTreeSerializer,
+)
 
 # The package itself is the repository, loaded under the name it has in
 # omniport. The FCM package is replaced because its __init__ reads the
-# service account certificate.
+# service account certificate, and the views package because its __init__
+# loads every view.
 _module('notifications', path=ROOT)
 _module('notifications.models', Notification=type('Notification', (), {
     'objects': Notifications(),
     'DoesNotExist': Notifications.DoesNotExist,
 }))
 fcm_package = _module('notifications.utils.fcm', path=ROOT / 'utils' / 'fcm')
+_module('notifications.views', path=ROOT / 'views')
 
 fcm = importlib.import_module('notifications.utils.fcm.fcm')
 for name in (
@@ -248,6 +297,7 @@ prune = importlib.import_module(
     'notifications.management.commands.prunepushendpoints'
 )
 serializers = importlib.import_module('notifications.serializers.notification')
+subscription_view = importlib.import_module('notifications.views.subscription')
 
 PushEndpoint = push_endpoint.PushEndpoint
 
@@ -275,5 +325,6 @@ def notification(id, data=None, category=None):
 
 def reset():
     redis.flushall()
+    Roots.rows = []
     Subscriptions.rows = []
     Notifications.rows = {}

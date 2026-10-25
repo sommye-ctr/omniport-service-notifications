@@ -29,7 +29,20 @@ class Subscription(APIView):
         """
 
         roots = Category.objects.root_nodes()
-        serializer = SubscriptionTreeSerializer(roots, many=True)
+
+        specific_app = request.query_params.get('app')
+        if specific_app:
+            roots = roots.filter(slug=specific_app)
+
+        # Without the person and action every row reads as unsubscribed
+        serializer = SubscriptionTreeSerializer(
+            roots,
+            many=True,
+            context={
+                'person': request.person,
+                'action': 'notifications',
+            }
+        )
         return Response(serializer.data)
 
     def post(self, request, *args, **kwargs):
