@@ -144,6 +144,26 @@ def _send(notification_id, tokens):
     return response
 
 
+def fcm_validate(tokens):
+    """
+    Send a dry run message to the tokens, which delivers nothing but reports
+    the tokens that FCM no longer accepts
+    :param tokens: list of FCM tokens, at most 500
+    :return: BatchResponse in the order of the tokens, or None if the check
+    could not be made
+    """
+
+    message = messaging.MulticastMessage(
+        data={'type': 'validate'},
+        tokens=tokens,
+    )
+    try:
+        return messaging.send_multicast(message, dry_run=True)
+    except Exception:
+        logger.exception('Could not validate tokens')
+        return None
+
+
 def fcm_subscribe(tokens, topic):
     """
     Subscribe the given tokens to a specific FCM topic.

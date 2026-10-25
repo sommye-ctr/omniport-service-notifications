@@ -8,7 +8,8 @@ from notifications.utils.fcm.fcm import (
     fcm_push,
     fcm_push_multicast,
     fcm_subscribe,
-    fcm_unsubscribe
+    fcm_unsubscribe,
+    fcm_validate
 )
 
 service_account_file = os.path.join(
@@ -24,4 +25,5 @@ __all__ = [
     'fcm_push',
     'fcm_push_multicast',
     'fcm_unsubscribe',
+    'fcm_validate',
 ]
