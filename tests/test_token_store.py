@@ -2,7 +2,7 @@
 Tests for registering push tokens and moving them between topics
 
 Run from the repository folder, in an environment with Django and
-firebase_admin installed, with
+firebase_admin 6.2 or later installed, with
     python -m unittest discover --start-directory tests
 """
 

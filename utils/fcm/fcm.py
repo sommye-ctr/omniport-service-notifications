@@ -134,7 +134,10 @@ def _send(notification_id, tokens):
     try:
         # use dry_run = True for testing purpose
         if tokens:
-            response = messaging.send_multicast(message, dry_run=False)
+            # send_multicast used FCM's batch endpoint, which Google shut down
+            response = messaging.send_each_for_multicast(
+                message, dry_run=False
+            )
         else:
             response = messaging.send(message, dry_run=False)
     except Exception:
@@ -158,7 +161,7 @@ def fcm_validate(tokens):
         tokens=tokens,
     )
     try:
-        return messaging.send_multicast(message, dry_run=True)
+        return messaging.send_each_for_multicast(message, dry_run=True)
     except Exception:
         logger.exception('Could not validate tokens')
         return None

@@ -2,7 +2,7 @@
 Tests for what a push carries and for the tokens it finds dead
 
 Run from the repository folder, in an environment with Django and
-firebase_admin installed, with
+firebase_admin 6.2 or later installed, with
     python -m unittest discover --start-directory tests
 """
 
@@ -33,7 +33,7 @@ def batch_response(dead):
     `dead`, and success for the rest, in the order of the message's tokens
     """
 
-    def send_multicast(message, dry_run=False):
+    def send_each_for_multicast(message, dry_run=False):
         return messaging.BatchResponse([
             messaging.SendResponse(
                 None if token in dead else {'name': f'messages/{token}'},
@@ -41,7 +41,7 @@ def batch_response(dead):
             )
             for token in message.tokens
         ])
-    return send_multicast
+    return send_each_for_multicast
 
 
 def unregistered():
@@ -74,10 +74,10 @@ class PayloadTestCase(unittest.TestCase):
     def multicast_message(self, data):
         stubs.notification(7, data=data, category=self.category)
         with mock.patch.object(
-                messaging, 'send_multicast', side_effect=batch_response({})
-        ) as send_multicast:
+                messaging, 'send_each_for_multicast', side_effect=batch_response({})
+        ) as send_each_for_multicast:
             self.assertTrue(fcm.fcm_push(7, tokens=['a', 'b']))
-        return send_multicast.call_args.args[0]
+        return send_each_for_multicast.call_args.args[0]
 
     def test_the_topic_message_carries_the_data_map(self):
         message = self.topic_message(DATA)
@@ -180,17 +180,17 @@ class DirectSendTestCase(unittest.TestCase):
 
     def send(self, dead, persons=(1, 2)):
         with mock.patch.object(
-                messaging, 'send_multicast', side_effect=batch_response(dead)
-        ) as send_multicast:
+                messaging, 'send_each_for_multicast', side_effect=batch_response(dead)
+        ) as send_each_for_multicast:
             tasks.execute_users_set_push(7, list(persons))
-        return send_multicast
+        return send_each_for_multicast
 
     def test_only_the_given_people_are_sent_to(self):
-        send_multicast = self.send({})
+        send_each_for_multicast = self.send({})
 
         tokens = [
             token
-            for call in send_multicast.call_args_list
+            for call in send_each_for_multicast.call_args_list
             for token in call.args[0].tokens
         ]
         self.assertEqual(sorted(tokens), ['alive', 'dead', 'elsewhere'])
@@ -222,7 +222,7 @@ class DirectSendTestCase(unittest.TestCase):
         store(1, 'placement-app:a', 'newer')
 
         with mock.patch.object(
-                messaging, 'send_multicast',
+                messaging, 'send_each_for_multicast',
                 side_effect=batch_response({'dead': unregistered()})
         ):
             tasks.push_to_endpoints(7, [(1, 'placement-app:a', 'dead')])
@@ -231,20 +231,20 @@ class DirectSendTestCase(unittest.TestCase):
 
     def test_bare_tokens_from_older_tasks_are_still_sent(self):
         with mock.patch.object(
-                messaging, 'send_multicast',
+                messaging, 'send_each_for_multicast',
                 side_effect=batch_response({'dead': unregistered()})
-        ) as send_multicast:
+        ) as send_each_for_multicast:
             self.assertTrue(tasks.push_to_endpoints(7, ['dead', 'alive']))
 
         self.assertEqual(
-            send_multicast.call_args.args[0].tokens, ['dead', 'alive']
+            send_each_for_multicast.call_args.args[0].tokens, ['dead', 'alive']
         )
         self.assertEqual(len(PushEndpoint.fetch(1)), 2)
 
     def test_endpoints_from_a_queued_task_arrive_as_lists(self):
         # Celery serialises the tuples to JSON, which turns them into lists
         with mock.patch.object(
-                messaging, 'send_multicast',
+                messaging, 'send_each_for_multicast',
                 side_effect=batch_response({'dead': unregistered()})
         ):
             tasks.subset_push(7, [[1, 'placement-app:a', 'dead']])
@@ -257,9 +257,9 @@ class DirectSendTestCase(unittest.TestCase):
         with mock.patch.object(
                 actions, 'Notification', return_value=notification
         ), mock.patch.object(
-                messaging, 'send_multicast',
+                messaging, 'send_each_for_multicast',
                 side_effect=batch_response({'dead': unregistered()})
-        ) as send_multicast:
+        ) as send_each_for_multicast:
             actions.push_notification(
                 template='Body',
                 category=Category('placement_and_internship__credits_audit'),
@@ -268,7 +268,7 @@ class DirectSendTestCase(unittest.TestCase):
             )
 
         self.assertEqual(
-            sorted(send_multicast.call_args.args[0].tokens), ['alive', 'dead']
+            sorted(send_each_for_multicast.call_args.args[0].tokens), ['alive', 'dead']
         )
         self.assertEqual(PushEndpoint.fetch(1), ['alive'])
 
@@ -288,19 +288,19 @@ class PruneTestCase(unittest.TestCase):
     def run_command(self, dry_run, side_effect=None):
         stdout, stderr = io.StringIO(), io.StringIO()
         with mock.patch.object(
-                messaging, 'send_multicast',
+                messaging, 'send_each_for_multicast',
                 side_effect=side_effect or batch_response({
                     'uninstalled': unregistered(),
                     'elsewhere': messaging.SenderIdMismatchError('Mismatch'),
                     'unavailable': exceptions.UnavailableError('Try later'),
                 }),
-        ) as send_multicast, mock.patch.object(
+        ) as send_each_for_multicast, mock.patch.object(
                 messaging, 'unsubscribe_from_topic'
         ) as unsubscribe:
             prune.Command(stdout=stdout, stderr=stderr).handle(
                 dry_run=dry_run
             )
-        self.send_multicast = send_multicast
+        self.send_each_for_multicast = send_each_for_multicast
         self.unsubscribe = unsubscribe
         return stdout.getvalue(), stderr.getvalue()
 
@@ -337,9 +337,9 @@ class PruneTestCase(unittest.TestCase):
     def test_the_check_is_a_dry_run_send_to_every_token(self):
         self.run_command(dry_run=False)
 
-        self.assertTrue(self.send_multicast.call_args.kwargs['dry_run'])
+        self.assertTrue(self.send_each_for_multicast.call_args.kwargs['dry_run'])
         self.assertEqual(
-            sorted(self.send_multicast.call_args.args[0].tokens),
+            sorted(self.send_each_for_multicast.call_args.args[0].tokens),
             ['alive', 'elsewhere', 'unavailable', 'uninstalled'],
         )
 
@@ -351,7 +351,7 @@ class PruneTestCase(unittest.TestCase):
 
         self.assertEqual(
             [len(call.args[0].tokens)
-             for call in self.send_multicast.call_args_list],
+             for call in self.send_each_for_multicast.call_args_list],
             [500, 1],
         )
 
